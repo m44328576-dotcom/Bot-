@@ -2,15 +2,18 @@ name: Python package using Conda
 
 on:
   push:
+    branches: [ main, master ]
   pull_request:
+    branches: [ main, master ]
 
 jobs:
-  build:
+  test:
+    name: Test Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.10']   # يمكن إضافة إصدارات أخرى مثل '3.8','3.9'
-      max-parallel: 5
+      fail-fast: false
 
     steps:
       - name: Checkout code
@@ -24,64 +27,88 @@ jobs:
           use-mamba: true
           activate-environment: ci
           environment-file: environment.yml
+          auto-activate-base: false
 
-      - name: Cache conda & pip packages
+      - name: Cache conda packages
         uses: actions/cache@v4
         with:
           path: |
             ${{ env.CONDA }}/pkgs
             ~/.conda/pkgs
-            ~/.cache/pip
-          key: conda-pkgs-${{ matrix.python-version }}-${{ hashFiles('environment.yml') }}
+          key: conda-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('environment.yml') }}
           restore-keys: |
-            conda-pkgs-${{ matrix.python-version }}-
+            conda-${{ runner.os }}-${{ matrix.python-version }}-
 
-      - name: Ensure environment is up-to-date
-        run: |
-          # نحدّث/ننشئ البيئة اسماً "ci" بناءً على environment.yml
-          conda env update --file environment.yml --name ci --prune
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.py') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ matrix.python-version }}-
 
-      - name: Diagnostics (python / pip)
+      - name: Create and activate environment
         run: |
-          conda run -n ci python --version
-          conda run -n ci pip --version
+          mamba env create -f environment.yml --force
+          conda activate ci
+
+      - name: Install package in development mode
+        run: |
+          pip install -e . --no-deps
+
+      - name: Display environment info
+        run: |
+          python --version
+          pip --version
+          conda info
+          conda list
 
       - name: Lint with flake8
         run: |
-          # نثبت flake8 داخل البيئة إن لم يكن موجودًا
-          conda run -n ci bash -lc "pip install --no-deps flake8 || true"
-          # توقف عند أخطاء تركيبية وخطوط حرجة
-          conda run -n ci bash -lc "flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics"
-          # تحوّل الأخطاء الأخرى لتحذيرات (لا تفشل الـ job)
-          conda run -n ci bash -lc "flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics"
+          # تثبيت flake8 إذا لم يكن موجوداً
+          pip install flake8
+          # فحص الأخطاء الحرجة (توقف عند وجودها)
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # فحص باقي الأخطاء (تحذيرات فقط)
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Run tests with pytest
         run: |
-          set -e
-          # تثبيت pytest إذا لزم
-          conda run -n ci bash -lc "pip install --no-deps pytest pytest-cov || true"
-          # تشغيل الاختبارات وتوليد تقارير
+          pip install pytest pytest-cov
           mkdir -p reports
-          conda run -n ci bash -lc '
-            pytest --junitxml=reports/junit.xml --cov=. || rc=$?
-            if [ "${rc:-0}" -eq 5 ]; then
-              echo "No tests collected (exit code 5). Add tests to run or change CI behaviour."
-              exit 1
-            else
-              exit ${rc:-0}
-            fi
-          '
+          pytest --junitxml=reports/junit.xml --cov=./ --cov-report=xml:reports/coverage.xml --cov-report=html:reports/htmlcov
 
-      - name: Upload test reports
-        if: always()
+      - name: Upload test results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: pytest-results
+          name: test-results-${{ matrix.python-version }}
+          path: |
+            reports/
+            !reports/htmlcov/
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-html-${{ matrix.python-version }}
+          path: reports/htmlcov/
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run security scan
+        run: |
+          pip install bandit safety
+          bandit -r . -f html -o reports/bandit.html || true
+          safety check --json --output reports/safety.json || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports
           path: reports/
-
-      - name: Upload coverage (optional)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: htmlcov/ || true
