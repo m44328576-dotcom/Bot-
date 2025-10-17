@@ -1,0 +1,4 @@
+aiogram
+flask
+sqlalchemy
+python-binance
