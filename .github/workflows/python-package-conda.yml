@@ -1,40 +1,87 @@
-name: Python Package using Conda
+name: Python package using Conda
 
-on: [push]
+on:
+  push:
+  pull_request:
 
 jobs:
-  build-linux:
+  build:
     runs-on: ubuntu-latest
     strategy:
+      matrix:
+        python-version: ['3.10']   # يمكن إضافة إصدارات أخرى مثل '3.8','3.9'
       max-parallel: 5
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v3
-      with:
-        python-version: '3.10'
-    - name: Add conda to system path
-      run: |
-        # $CONDA is an environment variable pointing to the root of the miniconda directory
-        echo $CONDA/bin >> $GITHUB_PATH
-    - name: Install dependencies
-      run: |
-        conda env update --file environment.yml --name base
-    - name: Lint with flake8
-      run: |
-        conda install flake8
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-- name: Test with pytest
-  run: |
-    conda install pytest
-    pytest || rc=$?
-    if [ "${rc:-0}" -eq 5 ]; then
-      echo "No tests collected (exit code 5). Add tests to run."
-      exit 1  # أو exit 0 لتجاهل الحالة (ليس مُستحسناً)
-    else
-      exit $rc
-    fi
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Miniconda (with mamba)
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+          auto-update-conda: true
+          use-mamba: true
+          activate-environment: ci
+          environment-file: environment.yml
+
+      - name: Cache conda & pip packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.CONDA }}/pkgs
+            ~/.conda/pkgs
+            ~/.cache/pip
+          key: conda-pkgs-${{ matrix.python-version }}-${{ hashFiles('environment.yml') }}
+          restore-keys: |
+            conda-pkgs-${{ matrix.python-version }}-
+
+      - name: Ensure environment is up-to-date
+        run: |
+          # نحدّث/ننشئ البيئة اسماً "ci" بناءً على environment.yml
+          conda env update --file environment.yml --name ci --prune
+
+      - name: Diagnostics (python / pip)
+        run: |
+          conda run -n ci python --version
+          conda run -n ci pip --version
+
+      - name: Lint with flake8
+        run: |
+          # نثبت flake8 داخل البيئة إن لم يكن موجودًا
+          conda run -n ci bash -lc "pip install --no-deps flake8 || true"
+          # توقف عند أخطاء تركيبية وخطوط حرجة
+          conda run -n ci bash -lc "flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics"
+          # تحوّل الأخطاء الأخرى لتحذيرات (لا تفشل الـ job)
+          conda run -n ci bash -lc "flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics"
+
+      - name: Run tests with pytest
+        run: |
+          set -e
+          # تثبيت pytest إذا لزم
+          conda run -n ci bash -lc "pip install --no-deps pytest pytest-cov || true"
+          # تشغيل الاختبارات وتوليد تقارير
+          mkdir -p reports
+          conda run -n ci bash -lc '
+            pytest --junitxml=reports/junit.xml --cov=. || rc=$?
+            if [ "${rc:-0}" -eq 5 ]; then
+              echo "No tests collected (exit code 5). Add tests to run or change CI behaviour."
+              exit 1
+            else
+              exit ${rc:-0}
+            fi
+          '
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: reports/
+
+      - name: Upload coverage (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: htmlcov/ || true
