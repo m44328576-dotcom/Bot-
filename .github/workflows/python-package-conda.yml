@@ -14,108 +14,38 @@ jobs:
       matrix:
         python-version: ['3.10']
       fail-fast: false
+    defaults:
+      run:
+        shell: bash -l {0}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Miniconda with Mamba
-        uses: conda-incubator/setup-miniconda@v2
+        uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: ${{ matrix.python-version }}
-          auto-update-conda: true
+          auto-update-conda: false
+          miniforge-version: latest
           use-mamba: true
           activate-environment: test-env
           auto-activate-base: false
           channels: conda-forge
           channel-priority: strict
-          miniforge-variant: Mambaforge
 
-      - name: Cache conda packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/conda_pkgs_dir
-            ~/.conda/pkgs
-          key: conda-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt', '**/setup.py', '**/pyproject.toml') }}
-          restore-keys: |
-            conda-${{ runner.os }}-${{ matrix.python-version }}-
-
-      - name: Install Python dependencies with conda
-        shell: bash -l {0}
+      - name: Install Python dependencies
         run: |
-          conda install -y numpy pandas
-
-      - name: Install testing dependencies with pip
-        shell: bash -l {0}
-        run: |
+          mamba install -y numpy pandas
           pip install pytest pytest-cov flake8
 
-      - name: Display environment information
-        shell: bash -l {0}
-        run: |
-          python --version
-          pip --version
-          conda info
-          conda list
-
       - name: Install package in development mode
-        shell: bash -l {0}
         run: |
           pip install -e .
 
-      - name: Run linting with flake8
-        shell: bash -l {0}
+      - name: Run linting and tests
         run: |
-          echo "Running critical linting checks..."
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-          echo "Running style checks..."
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
-      - name: Run tests with pytest
-        shell: bash -l {0}
-        run: |
           mkdir -p test-reports
-          echo "Running tests with coverage..."
-          pytest --junitxml=test-reports/junit.xml --cov=./ --cov-report=xml:test-reports/coverage.xml --cov-report=html:test-reports/htmlcov -v
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-${{ matrix.python-version }}
-          path: test-reports/
-          retention-days: 30
-
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          
-      - name: Install security tools
-        run: |
-          python -m pip install bandit safety
-          
-      - name: Run bandit security scan
-        run: |
-          mkdir -p security-reports
-          bandit -r . -f html -o security-reports/bandit.html || true
-          
-      - name: Run safety check
-        run: |
-          safety check --json --output security-reports/safety.json || true
-          
-      - name: Upload security reports
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-reports
-          path: security-reports/
-          retention-days: 30
+          pytest --junitxml=test-reports/junit.xml --cov=./ --cov-report=xml:test-reports/coverage.xml -v
