@@ -8,18 +8,41 @@ on:
 
 jobs:
   test:
-    name: اختبار بايثون ${{ matrix.python-version }}
+    name: Test Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10']   # يمكن إضافة إصدارات أخرى مثل '3.8','3.9'
+        python-version: ['3.10']
       fail-fast: false
 
     steps:
-      - name: تحميل الكود
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: إعداد Miniconda (مع mamba)
+      - name: Create environment.yml if missing
+        run: |
+          if [ ! -f environment.yml ]; then
+            echo "Creating basic environment.yml file"
+            cat > environment.yml << 'EOF'
+          name: test-env
+          channels:
+            - conda-forge
+          dependencies:
+            - python=3.10
+            - pip
+            - numpy
+            - pandas
+            - pip:
+              - pytest
+              - pytest-cov
+              - flake8
+          EOF
+            echo "environment.yml created successfully"
+          else
+            echo "environment.yml already exists"
+          fi
+
+      - name: Setup Miniconda (with mamba)
         uses: conda-incubator/setup-miniconda@v2
         with:
           python-version: ${{ matrix.python-version }}
@@ -28,84 +51,84 @@ jobs:
           activate-environment: test-env
           environment-file: environment.yml
           auto-activate-base: false
+          channels: conda-forge
+          channel-priority: strict
 
-      - name: التخزين المؤقت لحزم Conda
+      - name: Cache conda packages
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.CONDA }}/pkgs
+            ~/conda_pkgs_dir
             ~/.conda/pkgs
           key: conda-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('environment.yml') }}
           restore-keys: |
             conda-${{ runner.os }}-${{ matrix.python-version }}-
 
-      - name: التخزين المؤقت لحزم pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.py') }}
-          restore-keys: |
-            pip-${{ runner.os }}-${{ matrix.python-version }}-
-
-      - name: إنشاء وتفعيل البيئة
-        run: |
-          mamba env create -f environment.yml --force
-          conda activate test-env
-
-      - name: تثبيت الحزمة في وضع التطوير
-        run: |
-          pip install -e . --no-deps
-
-      - name: عرض معلومات البيئة
+      - name: Display environment information
+        shell: bash -l {0}
         run: |
           python --version
           pip --version
           conda info
           conda list
 
-      - name: فحص الكود باستخدام flake8
+      - name: Install package in development mode
+        shell: bash -l {0}
         run: |
-          pip install flake8
+          pip install -e .
+
+      - name: Run linting with flake8
+        shell: bash -l {0}
+        run: |
+          echo "Running critical linting checks..."
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          echo "Running style checks..."
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: تشغيل الاختبارات باستخدام pytest
+      - name: Run tests with pytest
+        shell: bash -l {0}
         run: |
-          pip install pytest pytest-cov
-          mkdir -p reports
-          pytest --junitxml=reports/junit.xml --cov=./ --cov-report=xml:reports/coverage.xml --cov-report=html:reports/htmlcov
+          mkdir -p test-reports
+          echo "Running tests with coverage..."
+          pytest --junitxml=test-reports/junit.xml --cov=./ --cov-report=xml:test-reports/coverage.xml --cov-report=html:test-reports/htmlcov -v
 
-      - name: رفع نتائج الاختبارات
+      - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results-${{ matrix.python-version }}
-          path: |
-            reports/
-            !reports/htmlcov/
-
-      - name: رفع تقرير التغطية
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-report-${{ matrix.python-version }}
-          path: reports/htmlcov/
+          path: test-reports/
+          retention-days: 30
 
   security-scan:
-    name: فحص الأمان
+    name: Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
       
-      - name: فحص الأمان
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install security tools
         run: |
-          pip install bandit safety
-          bandit -r . -f html -o reports/bandit.html || true
-          safety check --json --output reports/safety.json || true
-
-      - name: رفع تقارير الأمان
+          python -m pip install bandit safety
+          
+      - name: Run bandit security scan
+        run: |
+          mkdir -p security-reports
+          bandit -r . -f html -o security-reports/bandit.html || true
+          
+      - name: Run safety check
+        run: |
+          safety check --json --output security-reports/safety.json || true
+          
+      - name: Upload security reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: security-reports
-          path: reports/
+          path: security-reports/
+          retention-days: 30
