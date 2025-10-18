@@ -1,4 +1,4 @@
-name: Python package using Conda
+name: حزمة بايثون باستخدام Conda
 
 on:
   push:
@@ -7,29 +7,29 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test:
-    name: Test Python ${{ matrix.python-version }}
+  اختبار:
+    name: اختبار بايثون ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.10']   # يمكن إضافة إصدارات أخرى مثل '3.8','3.9'
-      fail-fast: false
+      fail-fast: false  # لا تتوقف جميع الوظائف عند فشل واحدة
 
     steps:
-      - name: Checkout code
+      - name: تحميل الكود
         uses: actions/checkout@v4
 
-      - name: Setup Miniconda (with mamba)
+      - name: إعداد Miniconda (مع mamba)
         uses: conda-incubator/setup-miniconda@v2
         with:
           python-version: ${{ matrix.python-version }}
           auto-update-conda: true
           use-mamba: true
-          activate-environment: ci
+          activate-environment: بيئة_التجريب
           environment-file: environment.yml
           auto-activate-base: false
 
-      - name: Cache conda packages
+      - name: التخزين المؤقت لحزم Conda
         uses: actions/cache@v4
         with:
           path: |
@@ -39,7 +39,7 @@ jobs:
           restore-keys: |
             conda-${{ runner.os }}-${{ matrix.python-version }}-
 
-      - name: Cache pip packages
+      - name: التخزين المؤقت لحزم pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -47,68 +47,68 @@ jobs:
           restore-keys: |
             pip-${{ runner.os }}-${{ matrix.python-version }}-
 
-      - name: Create and activate environment
+      - name: إنشاء وتفعيل البيئة
         run: |
           mamba env create -f environment.yml --force
-          conda activate ci
+          conda activate بيئة_التجريب
 
-      - name: Install package in development mode
+      - name: تثبيت الحزمة في وضع التطوير
         run: |
           pip install -e . --no-deps
 
-      - name: Display environment info
+      - name: عرض معلومات البيئة
         run: |
           python --version
           pip --version
           conda info
           conda list
 
-      - name: Lint with flake8
+      - name: فحص الكود باستخدام flake8
         run: |
           # تثبيت flake8 إذا لم يكن موجوداً
           pip install flake8
-          # فحص الأخطاء الحرجة (توقف عند وجودها)
+          # فحص الأخطاء الحرجة (تتوقف العملية عند وجودها)
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # فحص باقي الأخطاء (تحذيرات فقط)
+          # فحص باقي الأخطاء (لا تتوقف العملية)
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Run tests with pytest
+      - name: تشغيل الاختبارات باستخدام pytest
         run: |
           pip install pytest pytest-cov
           mkdir -p reports
           pytest --junitxml=reports/junit.xml --cov=./ --cov-report=xml:reports/coverage.xml --cov-report=html:reports/htmlcov
 
-      - name: Upload test results
+      - name: رفع نتائج الاختبارات
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always()  # رفع حتى لو فشلت الخطوات السابقة
         with:
-          name: test-results-${{ matrix.python-version }}
+          name: نتائج-الاختبار-${{ matrix.python-version }}
           path: |
             reports/
-            !reports/htmlcov/
+            !reports/htmlcov/  # استثناء مجلد htmlcov لأنه سيتم رفعه بشكل منفصل
 
-      - name: Upload coverage report
+      - name: رفع تقرير التغطية
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage-html-${{ matrix.python-version }}
+          name: تقرير-التغطية-${{ matrix.python-version }}
           path: reports/htmlcov/
 
-  security-scan:
-    name: Security Scan
+  فحص-الأمان:
+    name: فحص الأمان
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Run security scan
+      - name: فحص الأمان
         run: |
           pip install bandit safety
           bandit -r . -f html -o reports/bandit.html || true
           safety check --json --output reports/safety.json || true
 
-      - name: Upload security reports
+      - name: رفع تقارير الأمان
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: security-reports
+          name: تقارير-الأمان
           path: reports/
