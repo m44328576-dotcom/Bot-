@@ -1,19 +1,19 @@
-name: حزمة بايثون باستخدام Conda
+name: Python package using Conda
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
-  اختبار:
+  test:
     name: اختبار بايثون ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.10']   # يمكن إضافة إصدارات أخرى مثل '3.8','3.9'
-      fail-fast: false  # لا تتوقف جميع الوظائف عند فشل واحدة
+      fail-fast: false
 
     steps:
       - name: تحميل الكود
@@ -25,7 +25,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           auto-update-conda: true
           use-mamba: true
-          activate-environment: بيئة_التجريب
+          activate-environment: test-env
           environment-file: environment.yml
           auto-activate-base: false
 
@@ -50,7 +50,7 @@ jobs:
       - name: إنشاء وتفعيل البيئة
         run: |
           mamba env create -f environment.yml --force
-          conda activate بيئة_التجريب
+          conda activate test-env
 
       - name: تثبيت الحزمة في وضع التطوير
         run: |
@@ -65,11 +65,8 @@ jobs:
 
       - name: فحص الكود باستخدام flake8
         run: |
-          # تثبيت flake8 إذا لم يكن موجوداً
           pip install flake8
-          # فحص الأخطاء الحرجة (تتوقف العملية عند وجودها)
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # فحص باقي الأخطاء (لا تتوقف العملية)
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: تشغيل الاختبارات باستخدام pytest
@@ -80,21 +77,21 @@ jobs:
 
       - name: رفع نتائج الاختبارات
         uses: actions/upload-artifact@v4
-        if: always()  # رفع حتى لو فشلت الخطوات السابقة
+        if: always()
         with:
-          name: نتائج-الاختبار-${{ matrix.python-version }}
+          name: test-results-${{ matrix.python-version }}
           path: |
             reports/
-            !reports/htmlcov/  # استثناء مجلد htmlcov لأنه سيتم رفعه بشكل منفصل
+            !reports/htmlcov/
 
       - name: رفع تقرير التغطية
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: تقرير-التغطية-${{ matrix.python-version }}
+          name: coverage-report-${{ matrix.python-version }}
           path: reports/htmlcov/
 
-  فحص-الأمان:
+  security-scan:
     name: فحص الأمان
     runs-on: ubuntu-latest
     steps:
@@ -110,5 +107,5 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: تقارير-الأمان
+          name: security-reports
           path: reports/
